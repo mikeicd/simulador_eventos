@@ -108,7 +108,7 @@ class MM1:
         self.queue = Queue()
         self.cin = None
         self.cout = None
-        
+
         self.LCG = LCG(12345, 1103515245, 12345, 2**31)
 
     def __repr__(self) -> str:
@@ -125,54 +125,56 @@ class MM1:
             service_time = self.exponential_random_variate(self.service_rate)
             self.simulator.response_time += service_time
             self.simulator.schedule_event(
-                service_time, lambda: self.departure_action(), EVENTOS.PARTIDA, self, client_id
+                service_time, lambda: self.departure_action(client_id), EVENTOS.PARTIDA, self, client_id
             )
             self.idle = False
             # print("Inicia serviço")
         else:
             # Adiciona o evento à fila com o tempo de chegada
             if self.queue.size() <= self.queue_size:
-                event = Event(self.simulator.current_time, None, EVENTOS.SERVICE, self, client_id)
+                event = Event(self.simulator.current_time, None, EVENTOS.CHEGADA, self, client_id)
                 # print("Enfileira")
                 self.queue.enqueue(event)
             else:
                 pass
                 # print("Dropped")
 
-        if self.name == "recepcao":
-            interarrival_time = self.exponential_random_variate(self.arrival_rate) 
+        if self.name == "rec":
+            interarrival_time = self.exponential_random_variate(self.arrival_rate)
             new_client = client_id + 1
             evento = EVENTOS.CHEGADA
             self.simulator.schedule_event(
                 interarrival_time, lambda: self.arrival_action(new_client), evento, self, new_client
             )
 
-    def departure_action(self):
+    def departure_action(self, client_id):
         self.simulator.num_customers_served += 1
-
+        service_time = 0
         if not self.queue.is_empty():
             event = self.queue.dequeue()
+            client_id = event.client_id
             waiting_time = self.simulator.current_time - event.time
             self.queue_waiting_time += waiting_time
             # print("Tempo {:.2f}: Tempo espera de cliente".format(self.queue_waiting_time))
             self.num_customers_served_from_queue += 1
             service_time = self.exponential_random_variate(self.service_rate)
             self.simulator.response_time += waiting_time + service_time
+            # Proximo departure
             self.simulator.schedule_event(
-                service_time, lambda: self.departure_action(), EVENTOS.PARTIDA, self, event.client_id
+                service_time, lambda: self.departure_action(client_id), EVENTOS.PARTIDA, self, client_id
             )
-            if not self.cout is None:
-                mm1_next = self.cout.next()
-                self.simulator.schedule_event(
-                    0,
-                    lambda: mm1_next.arrival_action(event.client_id),
-                    EVENTOS.CHEGADA,
-                    mm1_next,
-                    event.client_id,
-                )
-
         else:
             self.idle = True
+
+        if not self.cout is None:
+            mm1_next = self.cout.next()
+            self.simulator.schedule_event(
+                service_time,
+                lambda: mm1_next.arrival_action(client_id),
+                EVENTOS.CHEGADA,
+                mm1_next,
+                client_id,
+            )
 
 # %% [markdown]
 # ## Classe Connector
@@ -218,11 +220,11 @@ class Simulator:
         self.num_customers_served = 0
         self.response_time = 0  # Armazena a acumulado o tempo de TEMPO ESPERA no Sistema        
 
-        self.recepcao = MM1("recepcao", 0.5, 0.5, 5, self)
-        self.triagem = MM1("atendimento", 0.5, 0.5, 5, self)
-        # self.atendimento = MM1("atendimento", 0.3, 0.8, 5, self)
+        self.recepcao = MM1("rec", 0.5, 1, 5, self)
+        self.triagem = MM1("    ate", 0.5, 1, 5, self)
+        self.atendimento = MM1("        pag", 0.5, 1, 5, self)
         self.rec_tri = Connector([self.recepcao], [self.triagem], [1])
-        # self.tri_ate = Connector([self.triagem], [self.atendimento], [1])
+        self.tri_ate = Connector([self.triagem], [self.atendimento], [1])
         self.LCG = LCG(12345, 1103515245, 12345, 2**31)
 
     def schedule_event(self, delay, action, event_type, mm1, client_id):
@@ -264,7 +266,7 @@ class Simulator:
 # ## Iniciando simulação
 
 # %%
-simulation_time = 200  # Tempo total de simulação
+simulation_time = 20000  # Tempo total de simulação
 
 simulator = Simulator()
 simulator.run(simulation_time)
