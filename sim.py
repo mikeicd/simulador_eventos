@@ -84,10 +84,7 @@ class Event:
         return self.time < other.time
     
     def __repr__(self) -> str:
-        if self.event_type in(EVENTOS.PARTIDA, EVENTOS.CHEGADA):
-            return f"{self.time:.2f} - {self.mm1.name} - {self.event_type.value} do Cliente {self.client_id:07d}"
-        else:
-            return ""
+        return f"{self.time:.2f} - {self.mm1.name} - {self.event_type.value} do Cliente {self.client_id:07d}"
 
 # %% [markdown]
 # ## Classe MM1
@@ -95,7 +92,7 @@ class Event:
 
 # %%
 class MM1:
-    def __init__(self, name, arrival_rate, service_rate, queue_size, simulator) -> None:
+    def __init__(self, name, arrival_rate, service_rate, simulator, queue_size: int = 5, entry : bool = False) -> None:
         self.name = name
         self.simulator = simulator
         self.arrival_rate = arrival_rate
@@ -108,6 +105,8 @@ class MM1:
         self.queue = Queue()
         self.cin = None
         self.cout = None
+        self.entry = entry
+        self. dropped = 0
 
         self.LCG = LCG(12345, 1103515245, 12345, 2**31)
 
@@ -136,10 +135,10 @@ class MM1:
                 # print("Enfileira")
                 self.queue.enqueue(event)
             else:
-                pass
-                # print("Dropped")
+                self.dropped += 1
+                print(f"Client {client_id} dropped on {self.name}")
 
-        if self.name == "rec":
+        if self.entry:
             interarrival_time = self.exponential_random_variate(self.arrival_rate)
             new_client = client_id + 1
             evento = EVENTOS.CHEGADA
@@ -149,23 +148,9 @@ class MM1:
 
     def departure_action(self, client_id):
         self.simulator.num_customers_served += 1
+        self.num_customers_served_from_queue += 1
         service_time = 0
-        if not self.queue.is_empty():
-            event = self.queue.dequeue()
-            client_id = event.client_id
-            waiting_time = self.simulator.current_time - event.time
-            self.queue_waiting_time += waiting_time
-            # print("Tempo {:.2f}: Tempo espera de cliente".format(self.queue_waiting_time))
-            self.num_customers_served_from_queue += 1
-            service_time = self.exponential_random_variate(self.service_rate)
-            self.simulator.response_time += waiting_time + service_time
-            # Proximo departure
-            self.simulator.schedule_event(
-                service_time, lambda: self.departure_action(client_id), EVENTOS.PARTIDA, self, client_id
-            )
-        else:
-            self.idle = True
-
+        
         if not self.cout is None:
             mm1_next = self.cout.next()
             self.simulator.schedule_event(
@@ -175,6 +160,22 @@ class MM1:
                 mm1_next,
                 client_id,
             )
+        
+        if not self.queue.is_empty():
+            event = self.queue.dequeue()
+            waiting_time = self.simulator.current_time - event.time
+            self.queue_waiting_time += waiting_time
+            # print("Tempo {:.2f}: Tempo espera de cliente".format(self.queue_waiting_time))
+            service_time = self.exponential_random_variate(self.service_rate)
+            self.simulator.response_time += waiting_time + service_time
+            # Proximo departure
+            self.simulator.schedule_event(
+                service_time, lambda: self.departure_action(event.client_id), EVENTOS.PARTIDA, self, event.client_id
+            )           
+        else:
+            self.idle = True
+            
+              
 
 # %% [markdown]
 # ## Classe Connector
@@ -220,11 +221,11 @@ class Simulator:
         self.num_customers_served = 0
         self.response_time = 0  # Armazena a acumulado o tempo de TEMPO ESPERA no Sistema        
 
-        self.recepcao = MM1("rec", 0.5, 1, 5, self)
-        self.triagem = MM1("    ate", 0.5, 1, 5, self)
-        self.atendimento = MM1("        pag", 0.5, 1, 5, self)
-        self.rec_tri = Connector([self.recepcao], [self.triagem], [1])
-        self.tri_ate = Connector([self.triagem], [self.atendimento], [1])
+        self.reception= MM1(name = "REC", arrival_rate = 0.5, service_rate= 1, simulator=self, queue_size= 5, entry=True)
+        self.triage = MM1("  TRI",  arrival_rate = 0.5, service_rate= 2, simulator=self, queue_size= 5)
+        self.consulting = MM1("    CON",  arrival_rate = 0.5, service_rate= 0.6, simulator=self, queue_size= 5)
+        self.rec_tri = Connector([self.reception], [self.triage], [1])
+        self.tri_ate = Connector([self.triage], [self.consulting], [1])
         self.LCG = LCG(12345, 1103515245, 12345, 2**31)
 
     def schedule_event(self, delay, action, event_type, mm1, client_id):
@@ -241,7 +242,7 @@ class Simulator:
     def run(self, end_time):
         client_id = 1
         self.schedule_event(
-            0, lambda: self.recepcao.arrival_action(client_id), EVENTOS.CHEGADA, self.recepcao, client_id
+            0, lambda: self.reception.arrival_action(client_id), EVENTOS.CHEGADA, self.reception, client_id
         )
 
         while self.current_time < end_time:
@@ -253,14 +254,14 @@ class Simulator:
             self.current_time = event.time
 
             event.action()
-        # print(
-        #     "Tempo {:.2f}: Número médio de requisições no sistema no Sistema".format(
-        #         self.response_time / self.current_time
-        #     )
-        # )
+        print(
+            "Tempo {:.2f}: Número médio de requisições no sistema no Sistema".format(
+                self.response_time / self.current_time
+            )
+        )
         print("Tempo {:.2f}: Total Requisicoes no Sistema".format(self.num_customers_served))
         print("Tempo {:.2f}: Vazao no Sistema".format(self.num_customers_served / end_time))
-        # print("Tempo {:.2f}: Tempo Resposta Medio no Sistema".format(self.response_time / self.num_customers_served))
+        print("Tempo {:.2f}: Tempo Resposta Medio no Sistema".format(self.response_time / self.num_customers_served))
 
 # %% [markdown]
 # ## Iniciando simulação
